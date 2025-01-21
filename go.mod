@@ -19,7 +19,7 @@ require (
 	github.com/prometheus/common v0.10.0
 	github.com/slack-go/slack v0.14.0
 	github.com/stretchr/testify v1.7.0
-	golang.org/x/net v0.29.0
+	golang.org/x/net v0.33.0
 )
 
 require (
