@@ -76,7 +76,7 @@ func (h *Service) HandleLinkMessage(req LinksRequest) (string, error) {
 			return "", errWontJoin
 		}
 
-		return "", nil
+		return "", errNotInTime
 	}
 
 	order, err := h.joinGroupOrder(groupID.ID)
