@@ -69,11 +69,27 @@ func (h *Service) HandleLinkMessage(req LinksRequest) (string, error) {
 		return "", errWontJoin
 	}
 
-	groupRate, err := h.getRateForGroup(req.Channel, groupID.ID, req.MessageID)
-	if err != nil {
-		if errors.Is(err, errNotInTime) {
-			return "", nil
+	shouldHandleOrder := h.shouldHandleOrder()
+	if !shouldHandleOrder {
+		_, err := h.informEvent(req.Channel, "It's too late for me... I won't track prices for this order :sleeping:", "", req.MessageID)
+		if err != nil {
+			return "", errWontJoin
 		}
+	}
+
+	order, err := h.joinGroupOrder(groupID.ID)
+	if err != nil {
+		_, _ = h.informEvent(req.Channel, "I had an error joining the order", "", req.MessageID)
+		return "", fmt.Errorf("join group order: %w", err)
+	}
+	h.currentlyWorkingOrders.Store(groupID, order)
+	venue, err := order.Venue()
+	if err == nil {
+		h.informEvent(req.Channel, fmt.Sprintf("Hi 👋, I've joined the order from [%s]", venue.Name), "", req.MessageID)
+	}
+
+	groupRate, err := h.getRateForGroup(order, req.Channel, req.MessageID)
+	if err != nil {
 		if strings.Contains(err.Error(), "order canceled") {
 			_, _ = h.informEvent(req.Channel, fmt.Sprintf("Order for group ID %s was canceled", groupID.ID), "", req.MessageID)
 			return "", nil
@@ -87,13 +103,8 @@ func (h *Service) HandleLinkMessage(req LinksRequest) (string, error) {
 		return "", nil
 	}
 
-	order, _ := h.currentlyWorkingOrders.Load(groupID.ID)
-	if order == nil {
-		return "", fmt.Errorf("order %s not initialized in map", groupID.ID)
-	}
-
 	ratesMessage := h.buildRatesMessage(groupRate, groupID.ID)
-	order.(*groupOrder).detailsMessageId, err = h.informEvent(req.Channel, ratesMessage, MarkAsPaidReaction, req.MessageID)
+	order.detailsMessageId, err = h.informEvent(req.Channel, ratesMessage, MarkAsPaidReaction, req.MessageID)
 	if err != nil {
 		return "", fmt.Errorf("failed sending details message: %w", err)
 	}
@@ -105,7 +116,7 @@ func (h *Service) HandleLinkMessage(req LinksRequest) (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), h.cfg.OrderDoneTimeout)
 	defer cancel()
-	if err = h.monitorDelivery(req.Channel, order.(*groupOrder), ctx, h.cfg.WaitBetweenStatusCheck, req.MessageID, ratesMessage); err != nil {
+	if err = h.monitorDelivery(req.Channel, order, ctx, h.cfg.WaitBetweenStatusCheck, req.MessageID, ratesMessage); err != nil {
 		if strings.Contains(err.Error(), "context canceled while waiting") {
 			_, _ = h.informEvent(req.Channel, "Timed out waiting for order to be done", "", req.MessageID)
 			return "", nil
@@ -239,23 +250,7 @@ func (h *Service) saveOrderAsync(order *groupOrder, groupRate GroupRate, receive
 
 }
 
-func (h *Service) getRateForGroup(receiver, groupID, messageID string) (groupRate GroupRate, err error) {
-	shouldHandleOrder := h.shouldHandleOrder()
-
-	if !shouldHandleOrder {
-		_, err := h.informEvent(receiver, "It's too late for me... I won't track prices for this order :sleeping:", "", messageID)
-		if err != nil {
-			return GroupRate{}, errWontJoin
-		}
-	}
-
-	order, err := h.joinGroupOrder(groupID)
-	if err != nil {
-		_, _ = h.informEvent(receiver, "I had an error joining the order", "", messageID)
-		return GroupRate{}, fmt.Errorf("join group order: %w", err)
-	}
-	h.currentlyWorkingOrders.Store(groupID, order)
-
+func (h *Service) getRateForGroup(order *groupOrder, receiver, messageID string) (groupRate GroupRate, err error) {
 	defer func() {
 		go h.saveOrderAsync(order, groupRate, receiver)
 	}()
@@ -274,10 +269,6 @@ func (h *Service) getRateForGroup(receiver, groupID, messageID string) (groupRat
 		return GroupRate{}, fmt.Errorf("wait for group to finish: %w", err)
 	}
 	monitorCancel()
-
-	if !shouldHandleOrder {
-		return GroupRate{}, errNotInTime
-	}
 
 	details, err := order.Details()
 	if err != nil {

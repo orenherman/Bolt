@@ -693,6 +693,11 @@ func TestSlackPurchaseGroup(t *testing.T) {
 			})
 			assert.NoError(t, err)
 
+			msg, err := WaitForOutboundSlackMessage(WaitForMessageTimeout, tdata.slackServer,
+				"Hi 👋, I've joined the order from [A Tasty Venue]",
+				MessageChannel, timestamp, ContainsMatch)
+			require.NoError(t, err)
+
 			// Adding relevant participants as users in Slack
 			participantIDsMapping := make(map[string]string)
 			for participantName, slackUser := range tc.participantsToAddToSlack {
@@ -729,7 +734,7 @@ func TestSlackPurchaseGroup(t *testing.T) {
 
 			// Validating the rates message
 			rates, ratesMessage := buildRatesMessage(t, order, expectedDelivery, participantIDsMapping)
-			msg, err := WaitForOutboundSlackMessage(WaitForMessageTimeout, tdata.slackServer,
+			msg, err = WaitForOutboundSlackMessage(WaitForMessageTimeout, tdata.slackServer,
 				fmt.Sprintf("Rates for Wolt order ID %s", orderShortID),
 				MessageChannel, timestamp, ContainsMatch)
 			require.NoError(t, err)
